@@ -1,0 +1,1380 @@
+--[[
+    ██████╗  ██████╗     ███████╗███╗   ██╗██╗██████╗ ███████╗██████╗
+   ██╔═══██╗██╔════╝     ██╔════╝████╗  ██║██║██╔══██╗██╔════╝██╔══██╗
+   ██║   ██║██║  ███╗    ███████╗██╔██╗ ██║██║██████╔╝█████╗  ██████╔╝
+   ██║   ██║██║   ██║    ╚════██║██║╚██╗██║██║██╔═══╝ ██╔══╝  ██╔══██╗
+   ╚██████╔╝╚██████╔╝    ███████║██║ ╚████║██║██║     ███████╗██║  ██║
+    ╚═════╝  ╚═════╝     ╚══════╝╚═╝  ╚═══╝╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝
+    
+    OG SNIPER v1.0.0
+    Roblox Username Sniping Tool
+    
+    Features:
+      - Futuristic cyberpunk UI theme
+      - Draggable window with smooth animations
+      - Tab system: Usernames | Settings
+      - Auto Send toggle with configurable interval
+      - Username queue with add/remove
+      - Bulk import usernames (one per line via InputBox)
+      - Loop Mode, Sound Alerts, Desktop Notifications toggles
+      - Clear All usernames
+      - Animated status bar
+--]]
+
+-- ─────────────────────────────────────────────
+--  SERVICES
+-- ─────────────────────────────────────────────
+local Players            = game:GetService("Players")
+local RunService         = game:GetService("RunService")
+local TweenService       = game:GetService("TweenService")
+local UserInputService   = game:GetService("UserInputService")
+local CoreGui            = game:GetService("CoreGui")
+
+local LocalPlayer        = Players.LocalPlayer
+local PlayerGui          = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ─────────────────────────────────────────────
+--  THEME
+-- ─────────────────────────────────────────────
+local Theme = {
+    -- Base
+    Background       = Color3.fromRGB(13,  13,  26),
+    BackgroundAlt    = Color3.fromRGB(10,  10,  18),
+    Surface          = Color3.fromRGB(18,  18,  36),
+    SurfaceHover     = Color3.fromRGB(22,  22,  44),
+
+    -- Accent
+    Cyan             = Color3.fromRGB(0,   212, 255),
+    CyanDim          = Color3.fromRGB(0,   130, 160),
+    Purple           = Color3.fromRGB(120, 0,   255),
+    PurpleDim        = Color3.fromRGB(70,  0,   150),
+
+    -- Text
+    TextPrimary      = Color3.fromRGB(220, 220, 230),
+    TextSecondary    = Color3.fromRGB(120, 120, 150),
+    TextMuted        = Color3.fromRGB(70,  70,  100),
+    TextAccent       = Color3.fromRGB(0,   212, 255),
+
+    -- Status
+    Danger           = Color3.fromRGB(255, 80,  80),
+    Success          = Color3.fromRGB(50,  220, 120),
+    Warning          = Color3.fromRGB(255, 190, 50),
+
+    -- Borders
+    Border           = Color3.fromRGB(0,   50,  70),
+    BorderActive     = Color3.fromRGB(0,   150, 200),
+
+    -- Titlebar gradient (simulated via UIGradient)
+    TitlebarStart    = Color3.fromRGB(0,   30,  50),
+    TitlebarEnd      = Color3.fromRGB(20,  0,   50),
+
+    -- Toggle
+    ToggleOff        = Color3.fromRGB(30,  30,  50),
+    ToggleOn         = Color3.fromRGB(0,   80,  110),
+    ToggleKnobOff    = Color3.fromRGB(80,  80,  110),
+    ToggleKnobOn     = Color3.fromRGB(0,   212, 255),
+
+    -- Transparency helpers (used with BackgroundTransparency)
+    SurfaceTransp    = 0.85,
+    BorderTransp     = 0.7,
+}
+
+-- ─────────────────────────────────────────────
+--  STATE
+-- ─────────────────────────────────────────────
+local State = {
+    Usernames    = {},        -- list of username strings
+    ActiveTab    = "usernames",
+    Sniping      = false,
+    AutoSend     = false,
+    LoopMode     = false,
+    SoundAlerts  = true,
+    Notifications= false,
+    Interval     = 500,       -- ms
+    StatusText   = "IDLE",
+}
+
+-- ─────────────────────────────────────────────
+--  TWEEN HELPERS
+-- ─────────────────────────────────────────────
+local function Tween(obj, props, duration, style, direction)
+    style     = style     or Enum.EasingStyle.Quart
+    direction = direction or Enum.EasingDirection.Out
+    local info = TweenInfo.new(duration or 0.25, style, direction)
+    local t    = TweenService:Create(obj, info, props)
+    t:Play()
+    return t
+end
+
+local function SpringTween(obj, props, duration)
+    return Tween(obj, props, duration or 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+end
+
+-- ─────────────────────────────────────────────
+--  UI FACTORY HELPERS
+-- ─────────────────────────────────────────────
+local function Make(class, props)
+    local obj = Instance.new(class)
+    for k, v in pairs(props) do
+        if k ~= "Parent" then
+            obj[k] = v
+        end
+    end
+    if props.Parent then obj.Parent = props.Parent end
+    return obj
+end
+
+local function AddCorner(parent, radius)
+    Make("UICorner", { CornerRadius = UDim.new(0, radius or 8), Parent = parent })
+end
+
+local function AddStroke(parent, color, thickness, transparency)
+    Make("UIStroke", {
+        Color        = color or Theme.Border,
+        Thickness    = thickness or 1,
+        Transparency = transparency or Theme.BorderTransp,
+        Parent       = parent,
+    })
+end
+
+local function AddPadding(parent, top, right, bottom, left)
+    Make("UIPadding", {
+        PaddingTop    = UDim.new(0, top    or 8),
+        PaddingRight  = UDim.new(0, right  or 8),
+        PaddingBottom = UDim.new(0, bottom or 8),
+        PaddingLeft   = UDim.new(0, left   or 8),
+        Parent        = parent,
+    })
+end
+
+local function AddListLayout(parent, direction, spacing, align)
+    Make("UIListLayout", {
+        FillDirection       = direction or Enum.FillDirection.Vertical,
+        SortOrder           = Enum.SortOrder.LayoutOrder,
+        Padding             = UDim.new(0, spacing or 6),
+        HorizontalAlignment = align or Enum.HorizontalAlignment.Left,
+        Parent              = parent,
+    })
+end
+
+local function Label(text, parent, size, color, weight, xAlign)
+    return Make("TextLabel", {
+        Text               = text,
+        Font               = weight == "bold" and Enum.Font.GothamBold or Enum.Font.Gotham,
+        TextSize           = size or 12,
+        TextColor3         = color or Theme.TextPrimary,
+        BackgroundTransparency = 1,
+        TextXAlignment     = xAlign or Enum.TextXAlignment.Left,
+        Size               = UDim2.new(1, 0, 0, size and size + 6 or 18),
+        Parent             = parent,
+    })
+end
+
+-- ─────────────────────────────────────────────
+--  ROOT SCREENGUI
+-- ─────────────────────────────────────────────
+-- Try CoreGui first (executor), fall back to PlayerGui
+local ScreenGui
+pcall(function()
+    ScreenGui = Make("ScreenGui", {
+        Name             = "OgSniper",
+        ResetOnSpawn     = false,
+        ZIndexBehavior   = Enum.ZIndexBehavior.Sibling,
+        Parent           = CoreGui,
+    })
+end)
+if not ScreenGui or not ScreenGui.Parent then
+    ScreenGui = Make("ScreenGui", {
+        Name             = "OgSniper",
+        ResetOnSpawn     = false,
+        ZIndexBehavior   = Enum.ZIndexBehavior.Sibling,
+        Parent           = PlayerGui,
+    })
+end
+
+-- ─────────────────────────────────────────────
+--  MAIN WINDOW  (520 x auto)
+-- ─────────────────────────────────────────────
+local Window = Make("Frame", {
+    Name                 = "Window",
+    Size                 = UDim2.new(0, 520, 0, 460),
+    Position             = UDim2.new(0.5, -260, 0.5, -230),
+    BackgroundColor3     = Theme.Background,
+    BorderSizePixel      = 0,
+    ClipsDescendants     = true,
+    Parent               = ScreenGui,
+})
+AddCorner(Window, 14)
+AddStroke(Window, Theme.Cyan, 1, 0.75)
+
+-- Outer glow (simulated via ImageLabel with radial gradient — use a shadow frame)
+local GlowFrame = Make("Frame", {
+    Name                 = "Glow",
+    Size                 = UDim2.new(1, 40, 1, 40),
+    Position             = UDim2.new(0, -20, 0, -20),
+    BackgroundColor3     = Theme.Cyan,
+    BackgroundTransparency = 0.95,
+    BorderSizePixel      = 0,
+    ZIndex               = 0,
+    Parent               = Window,
+})
+AddCorner(GlowFrame, 20)
+
+-- ─────────────────────────────────────────────
+--  TITLE BAR
+-- ─────────────────────────────────────────────
+local TitleBar = Make("Frame", {
+    Name             = "TitleBar",
+    Size             = UDim2.new(1, 0, 0, 48),
+    Position         = UDim2.new(0, 0, 0, 0),
+    BackgroundColor3 = Theme.TitlebarStart,
+    BorderSizePixel  = 0,
+    ZIndex           = 3,
+    Parent           = Window,
+})
+Make("UIGradient", {
+    Color     = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Theme.TitlebarStart),
+        ColorSequenceKeypoint.new(1, Theme.TitlebarEnd),
+    }),
+    Rotation  = 90,
+    Parent    = TitleBar,
+})
+AddStroke(TitleBar, Theme.Cyan, 1, 0.85)
+
+-- Logo badge
+local Logo = Make("Frame", {
+    Name             = "Logo",
+    Size             = UDim2.new(0, 30, 0, 30),
+    Position         = UDim2.new(0, 14, 0.5, -15),
+    BackgroundColor3 = Theme.Cyan,
+    BorderSizePixel  = 0,
+    ZIndex           = 4,
+    Parent           = TitleBar,
+})
+AddCorner(Logo, 7)
+Make("UIGradient", {
+    Color    = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Theme.Cyan),
+        ColorSequenceKeypoint.new(1, Theme.Purple),
+    }),
+    Rotation = 135,
+    Parent   = Logo,
+})
+Make("TextLabel", {
+    Text               = "⚡",
+    Font               = Enum.Font.GothamBold,
+    TextSize           = 15,
+    TextColor3         = Color3.new(1,1,1),
+    BackgroundTransparency = 1,
+    Size               = UDim2.new(1,0,1,0),
+    TextXAlignment     = Enum.TextXAlignment.Center,
+    TextYAlignment     = Enum.TextYAlignment.Center,
+    ZIndex             = 5,
+    Parent             = Logo,
+})
+
+-- Title text
+local TitleLabel = Make("TextLabel", {
+    Text               = "OG SNIPER",
+    Font               = Enum.Font.GothamBold,
+    TextSize           = 13,
+    TextColor3         = Theme.Cyan,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 52, 0, 9),
+    Size               = UDim2.new(0, 200, 0, 16),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 4,
+    Parent             = TitleBar,
+})
+Make("UIGradient", {
+    Color    = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Theme.Cyan),
+        ColorSequenceKeypoint.new(1, Theme.Purple),
+    }),
+    Rotation = 0,
+    Parent   = TitleLabel,
+})
+
+Make("TextLabel", {
+    Text               = "ROBLOX USERNAME TOOL",
+    Font               = Enum.Font.Gotham,
+    TextSize           = 9,
+    TextColor3         = Theme.CyanDim,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 52, 0, 27),
+    Size               = UDim2.new(0, 200, 0, 12),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 4,
+    Parent             = TitleBar,
+})
+
+-- Window control dots
+local function CtrlDot(color, xOffset, parent, callback)
+    local dot = Make("TextButton", {
+        Text             = "",
+        Size             = UDim2.new(0, 12, 0, 12),
+        Position         = UDim2.new(1, xOffset, 0.5, -6),
+        BackgroundColor3 = color,
+        BorderSizePixel  = 0,
+        ZIndex           = 5,
+        Parent           = parent,
+    })
+    AddCorner(dot, 99)
+    dot.MouseButton1Click:Connect(function()
+        if callback then callback() end
+    end)
+    dot.MouseEnter:Connect(function() Tween(dot, {BackgroundTransparency = 0.3}, 0.15) end)
+    dot.MouseLeave:Connect(function() Tween(dot, {BackgroundTransparency = 0}, 0.15) end)
+    return dot
+end
+
+-- Close button
+CtrlDot(Color3.fromRGB(255,95,87),  -48, TitleBar, function()
+    Tween(Window, {BackgroundTransparency = 1, Size = UDim2.new(0,480,0,0)}, 0.3)
+    task.delay(0.35, function() ScreenGui:Destroy() end)
+end)
+-- Minimize (shrink animation)
+CtrlDot(Color3.fromRGB(254,188,46), -34, TitleBar, function()
+    SpringTween(Window, {Size = UDim2.new(0,520,0,460)}, 0.4)
+    Tween(Window, {Size = UDim2.new(0,520,0,48)}, 0.3)
+end)
+-- Restore
+CtrlDot(Color3.fromRGB(40,200,64),  -20, TitleBar, function()
+    SpringTween(Window, {Size = UDim2.new(0,520,0,460)}, 0.4)
+end)
+
+-- ─────────────────────────────────────────────
+--  DRAGGING
+-- ─────────────────────────────────────────────
+do
+    local dragging, dragStart, startPos = false, nil, nil
+
+    TitleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging  = true
+            dragStart = input.Position
+            startPos  = Window.Position
+        end
+    end)
+
+    TitleBar.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            Window.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+-- ─────────────────────────────────────────────
+--  TAB BAR
+-- ─────────────────────────────────────────────
+local TabBar = Make("Frame", {
+    Name             = "TabBar",
+    Size             = UDim2.new(1, 0, 0, 36),
+    Position         = UDim2.new(0, 0, 0, 48),
+    BackgroundColor3 = Color3.fromRGB(8, 8, 16),
+    BorderSizePixel  = 0,
+    ZIndex           = 3,
+    Parent           = Window,
+})
+AddStroke(TabBar, Theme.Cyan, 1, 0.9)
+
+local TabLayout = Make("UIListLayout", {
+    FillDirection       = Enum.FillDirection.Horizontal,
+    SortOrder           = Enum.SortOrder.LayoutOrder,
+    Padding             = UDim.new(0, 2),
+    VerticalAlignment   = Enum.VerticalAlignment.Bottom,
+    HorizontalAlignment = Enum.HorizontalAlignment.Left,
+    Parent              = TabBar,
+})
+AddPadding(TabBar, 0, 0, 0, 14)
+
+-- ─────────────────────────────────────────────
+--  CONTENT AREA
+-- ─────────────────────────────────────────────
+local ContentArea = Make("Frame", {
+    Name             = "Content",
+    Size             = UDim2.new(1, 0, 1, -120),  -- below tabs, above status
+    Position         = UDim2.new(0, 0, 0, 84),
+    BackgroundTransparency = 1,
+    BorderSizePixel  = 0,
+    ClipsDescendants = true,
+    ZIndex           = 2,
+    Parent           = Window,
+})
+
+-- ─────────────────────────────────────────────
+--  STATUS BAR
+-- ─────────────────────────────────────────────
+local StatusBar = Make("Frame", {
+    Name             = "StatusBar",
+    Size             = UDim2.new(1, 0, 0, 28),
+    Position         = UDim2.new(0, 0, 1, -28),
+    BackgroundColor3 = Color3.fromRGB(6, 6, 12),
+    BorderSizePixel  = 0,
+    ZIndex           = 3,
+    Parent           = Window,
+})
+AddStroke(StatusBar, Theme.Cyan, 1, 0.92)
+
+-- Dot
+local StatusDot = Make("Frame", {
+    Size             = UDim2.new(0, 7, 0, 7),
+    Position         = UDim2.new(0, 14, 0.5, -3),
+    BackgroundColor3 = Theme.Cyan,
+    BorderSizePixel  = 0,
+    ZIndex           = 4,
+    Parent           = StatusBar,
+})
+AddCorner(StatusDot, 99)
+
+-- Pulse animation on dot
+local dotPulse = true
+task.spawn(function()
+    while dotPulse do
+        Tween(StatusDot, {BackgroundTransparency = 0.6}, 0.8)
+        task.wait(0.8)
+        Tween(StatusDot, {BackgroundTransparency = 0}, 0.8)
+        task.wait(0.8)
+    end
+end)
+
+local StatusLabel = Make("TextLabel", {
+    Text               = "● IDLE",
+    Font               = Enum.Font.GothamBold,
+    TextSize           = 9,
+    TextColor3         = Theme.CyanDim,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 26, 0, 0),
+    Size               = UDim2.new(0.5, 0, 1, 0),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 4,
+    Parent             = StatusBar,
+})
+
+Make("TextLabel", {
+    Text               = "v1.0.0  •  OG SNIPER",
+    Font               = Enum.Font.Gotham,
+    TextSize           = 9,
+    TextColor3         = Theme.TextMuted,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 0, 0, 0),
+    Size               = UDim2.new(1, -14, 1, 0),
+    TextXAlignment     = Enum.TextXAlignment.Right,
+    ZIndex             = 4,
+    Parent             = StatusBar,
+})
+
+local function SetStatus(text, color)
+    StatusLabel.Text       = "● " .. text
+    StatusLabel.TextColor3 = color or Theme.CyanDim
+end
+
+-- ─────────────────────────────────────────────
+--  PANEL SYSTEM
+-- ─────────────────────────────────────────────
+local Panels = {}
+
+local function NewPanel(name)
+    local panel = Make("ScrollingFrame", {
+        Name                  = name,
+        Size                  = UDim2.new(1, 0, 1, 0),
+        Position              = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel       = 0,
+        ScrollBarThickness    = 3,
+        ScrollBarImageColor3  = Theme.Cyan,
+        CanvasSize            = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize   = Enum.AutomaticSize.Y,
+        Visible               = false,
+        ZIndex                = 2,
+        Parent                = ContentArea,
+    })
+    AddPadding(panel, 14, 18, 14, 18)
+    AddListLayout(panel, Enum.FillDirection.Vertical, 10)
+    return panel
+end
+
+-- ─────────────────────────────────────────────
+--  COMPONENT BUILDERS
+-- ─────────────────────────────────────────────
+
+-- Section header label
+local function SectionLabel(text, parent, order)
+    local f = Make("Frame", {
+        Size             = UDim2.new(1, 0, 0, 18),
+        BackgroundTransparency = 1,
+        LayoutOrder      = order or 0,
+        Parent           = parent,
+    })
+    Make("TextLabel", {
+        Text               = text:upper(),
+        Font               = Enum.Font.GothamBold,
+        TextSize           = 9,
+        TextColor3         = Theme.CyanDim,
+        BackgroundTransparency = 1,
+        Size               = UDim2.new(0.45, 0, 1, 0),
+        TextXAlignment     = Enum.TextXAlignment.Left,
+        Parent             = f,
+    })
+    Make("Frame", {
+        Size             = UDim2.new(0.5, 0, 0, 1),
+        Position         = UDim2.new(0.47, 0, 0.5, 0),
+        BackgroundColor3 = Theme.Border,
+        BorderSizePixel  = 0,
+        Parent           = f,
+    })
+    return f
+end
+
+-- Card frame
+local function Card(parent, order, height)
+    local card = Make("Frame", {
+        Size             = UDim2.new(1, 0, 0, height or 60),
+        BackgroundColor3 = Theme.Surface,
+        BackgroundTransparency = 0.5,
+        BorderSizePixel  = 0,
+        LayoutOrder      = order or 0,
+        Parent           = parent,
+    })
+    AddCorner(card, 10)
+    AddStroke(card, Theme.Cyan, 1, 0.88)
+    AddPadding(card, 10, 14, 10, 14)
+    return card
+end
+
+-- Toggle component: returns the toggle frame, and a function to set state
+local function Toggle(parent, xOffset, yOffset, initialState, onChange)
+    local state = initialState or false
+
+    local bg = Make("Frame", {
+        Size             = UDim2.new(0, 40, 0, 21),
+        Position         = UDim2.new(1, -(xOffset or 0) - 40, 0.5, -10),
+        BackgroundColor3 = state and Theme.ToggleOn or Theme.ToggleOff,
+        BorderSizePixel  = 0,
+        ZIndex           = 4,
+        Parent           = parent,
+    })
+    AddCorner(bg, 99)
+    AddStroke(bg, state and Theme.Cyan or Theme.Border, 1, state and 0.5 or 0.7)
+
+    local knob = Make("Frame", {
+        Size             = UDim2.new(0, 15, 0, 15),
+        Position         = state and UDim2.new(1, -18, 0.5, -7) or UDim2.new(0, 3, 0.5, -7),
+        BackgroundColor3 = state and Theme.ToggleKnobOn or Theme.ToggleKnobOff,
+        BorderSizePixel  = 0,
+        ZIndex           = 5,
+        Parent           = bg,
+    })
+    AddCorner(knob, 99)
+
+    local btn = Make("TextButton", {
+        Text             = "",
+        Size             = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        ZIndex           = 6,
+        Parent           = bg,
+    })
+
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        Tween(bg,   { BackgroundColor3 = state and Theme.ToggleOn or Theme.ToggleOff }, 0.2)
+        Tween(knob, {
+            Position         = state and UDim2.new(1,-18,0.5,-7) or UDim2.new(0,3,0.5,-7),
+            BackgroundColor3 = state and Theme.ToggleKnobOn or Theme.ToggleKnobOff,
+        }, 0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        local stroke = bg:FindFirstChildOfClass("UIStroke")
+        if stroke then stroke.Color = state and Theme.Cyan or Theme.Border end
+        if onChange then onChange(state) end
+    end)
+
+    return bg, function() return state end
+end
+
+-- Cyber button
+local function CyberButton(text, parent, order, color, onClick)
+    color = color or Theme.Cyan
+    local btn = Make("TextButton", {
+        Text             = text,
+        Font             = Enum.Font.GothamBold,
+        TextSize         = 10,
+        TextColor3       = color,
+        Size             = UDim2.new(0, 80, 0, 26),
+        Position         = UDim2.new(1, -80, 0.5, -13),
+        BackgroundColor3 = color,
+        BackgroundTransparency = 0.88,
+        BorderSizePixel  = 0,
+        LayoutOrder      = order or 0,
+        ZIndex           = 4,
+        Parent           = parent,
+    })
+    AddCorner(btn, 7)
+    AddStroke(btn, color, 1, 0.6)
+    btn.MouseEnter:Connect(function()
+        Tween(btn, {BackgroundTransparency = 0.75}, 0.15)
+    end)
+    btn.MouseLeave:Connect(function()
+        Tween(btn, {BackgroundTransparency = 0.88}, 0.15)
+    end)
+    btn.MouseButton1Click:Connect(function()
+        Tween(btn, {Size = UDim2.new(0,76,0,24)}, 0.08)
+        task.delay(0.08, function()
+            Tween(btn, {Size = UDim2.new(0,80,0,26)}, 0.15, Enum.EasingStyle.Back)
+        end)
+        if onClick then onClick() end
+    end)
+    return btn
+end
+
+-- Setting row (title, description, right widget)
+local function SettingRow(card, title, desc, widgetFn)
+    -- title
+    Make("TextLabel", {
+        Text               = title,
+        Font               = Enum.Font.GothamBold,
+        TextSize           = 12,
+        TextColor3         = Theme.TextPrimary,
+        BackgroundTransparency = 1,
+        Position           = UDim2.new(0, 0, 0, 0),
+        Size               = UDim2.new(0.7, 0, 0, 16),
+        TextXAlignment     = Enum.TextXAlignment.Left,
+        ZIndex             = 3,
+        Parent             = card,
+    })
+    Make("TextLabel", {
+        Text               = desc,
+        Font               = Enum.Font.Gotham,
+        TextSize           = 10,
+        TextColor3         = Theme.TextMuted,
+        BackgroundTransparency = 1,
+        Position           = UDim2.new(0, 0, 0, 18),
+        Size               = UDim2.new(0.72, 0, 0, 14),
+        TextXAlignment     = Enum.TextXAlignment.Left,
+        ZIndex             = 3,
+        Parent             = card,
+    })
+    if widgetFn then widgetFn(card) end
+end
+
+-- ─────────────────────────────────────────────
+--  PANEL: USERNAMES
+-- ─────────────────────────────────────────────
+local UsernamesPanel = NewPanel("Usernames")
+
+-- Section: Add username
+SectionLabel("Target Usernames", UsernamesPanel, 1)
+
+local addCard = Card(UsernamesPanel, 2, 50)
+addCard.AutomaticSize = Enum.AutomaticSize.None
+
+local UnameInput = Make("TextBox", {
+    PlaceholderText    = "Enter Roblox username...",
+    PlaceholderColor3  = Theme.TextMuted,
+    Text               = "",
+    Font               = Enum.Font.Gotham,
+    TextSize           = 12,
+    TextColor3         = Theme.TextPrimary,
+    BackgroundColor3   = Color3.fromRGB(5, 5, 12),
+    BorderSizePixel    = 0,
+    Size               = UDim2.new(1, -100, 1, -16),
+    Position           = UDim2.new(0, 0, 0, 0),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ClearTextOnFocus   = false,
+    ZIndex             = 4,
+    Parent             = addCard,
+})
+AddCorner(UnameInput, 7)
+AddStroke(UnameInput, Theme.Cyan, 1, 0.8)
+AddPadding(UnameInput, 0, 10, 0, 10)
+
+UnameInput.Focused:Connect(function()
+    Tween(UnameInput:FindFirstChildOfClass("UIStroke"), {Transparency = 0.5}, 0.2)
+end)
+UnameInput.FocusLost:Connect(function()
+    Tween(UnameInput:FindFirstChildOfClass("UIStroke"), {Transparency = 0.8}, 0.2)
+end)
+
+-- ─────────────────────────────────────────────
+--  USERNAME LIST
+-- ─────────────────────────────────────────────
+local listSectionFrame = Make("Frame", {
+    Size             = UDim2.new(1, 0, 0, 18),
+    BackgroundTransparency = 1,
+    LayoutOrder      = 3,
+    Parent           = UsernamesPanel,
+})
+local listSectionTitle = Make("TextLabel", {
+    Text               = "QUEUE (0)",
+    Font               = Enum.Font.GothamBold,
+    TextSize           = 9,
+    TextColor3         = Theme.CyanDim,
+    BackgroundTransparency = 1,
+    Size               = UDim2.new(0.45, 0, 1, 0),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    Parent             = listSectionFrame,
+})
+Make("Frame", {
+    Size             = UDim2.new(0.5, 0, 0, 1),
+    Position         = UDim2.new(0.47, 0, 0.5, 0),
+    BackgroundColor3 = Theme.Border,
+    BorderSizePixel  = 0,
+    Parent           = listSectionFrame,
+})
+
+local ListContainer = Make("Frame", {
+    Size             = UDim2.new(1, 0, 0, 160),
+    BackgroundTransparency = 1,
+    BorderSizePixel  = 0,
+    LayoutOrder      = 4,
+    ClipsDescendants = true,
+    Parent           = UsernamesPanel,
+})
+
+local ListScroll = Make("ScrollingFrame", {
+    Size                  = UDim2.new(1, 0, 1, 0),
+    BackgroundTransparency = 1,
+    BorderSizePixel       = 0,
+    ScrollBarThickness    = 3,
+    ScrollBarImageColor3  = Theme.Cyan,
+    CanvasSize            = UDim2.new(0, 0, 0, 0),
+    AutomaticCanvasSize   = Enum.AutomaticSize.Y,
+    ZIndex                = 3,
+    Parent                = ListContainer,
+})
+AddListLayout(ListScroll, Enum.FillDirection.Vertical, 5)
+AddPadding(ListScroll, 2, 4, 2, 0)
+
+local EmptyLabel = Make("TextLabel", {
+    Text               = "🎯  No usernames queued",
+    Font               = Enum.Font.Gotham,
+    TextSize           = 11,
+    TextColor3         = Theme.TextMuted,
+    BackgroundTransparency = 1,
+    Size               = UDim2.new(1, 0, 0, 40),
+    TextXAlignment     = Enum.TextXAlignment.Center,
+    Visible            = true,
+    ZIndex             = 3,
+    Parent             = ListScroll,
+})
+
+-- Username item renderer
+local UsernameItems = {}
+
+local function UpdateCount()
+    local n = #State.Usernames
+    listSectionTitle.Text = "QUEUE (" .. n .. ")"
+    EmptyLabel.Visible = n == 0
+end
+
+local function RenderUsernameItem(username, index)
+    local row = Make("Frame", {
+        Name             = "UItem_" .. index,
+        Size             = UDim2.new(1, -4, 0, 30),
+        BackgroundColor3 = Color3.fromRGB(0, 50, 70),
+        BackgroundTransparency = 0.88,
+        BorderSizePixel  = 0,
+        LayoutOrder      = index,
+        ZIndex           = 3,
+        Parent           = ListScroll,
+    })
+    AddCorner(row, 7)
+    AddStroke(row, Theme.Cyan, 1, 0.88)
+
+    -- Dot
+    Make("Frame", {
+        Size             = UDim2.new(0, 6, 0, 6),
+        Position         = UDim2.new(0, 12, 0.5, -3),
+        BackgroundColor3 = Theme.Cyan,
+        BorderSizePixel  = 0,
+        ZIndex           = 4,
+        Parent           = row,
+    }):FindFirstChildOfClass("UICorner") or Make("UICorner", {CornerRadius=UDim.new(0,99), Parent=row:FindFirstChild("Frame") or row})
+    local dot = row:FindFirstChildOfClass("Frame")
+    if dot then AddCorner(dot, 99) end
+
+    Make("TextLabel", {
+        Text               = "@" .. username,
+        Font               = Enum.Font.Gotham,
+        TextSize           = 11,
+        TextColor3         = Theme.TextPrimary,
+        BackgroundTransparency = 1,
+        Position           = UDim2.new(0, 28, 0, 0),
+        Size               = UDim2.new(1, -60, 1, 0),
+        TextXAlignment     = Enum.TextXAlignment.Left,
+        ZIndex             = 4,
+        Parent             = row,
+    })
+
+    local removeBtn = Make("TextButton", {
+        Text             = "✕",
+        Font             = Enum.Font.GothamBold,
+        TextSize         = 10,
+        TextColor3       = Color3.fromRGB(255,80,80),
+        BackgroundTransparency = 1,
+        Position         = UDim2.new(1, -30, 0.5, -10),
+        Size             = UDim2.new(0, 22, 0, 20),
+        ZIndex           = 5,
+        Parent           = row,
+    })
+    removeBtn.MouseButton1Click:Connect(function()
+        Tween(row, {BackgroundTransparency = 1}, 0.2)
+        Tween(row, {Size = UDim2.new(1,-4,0,0)}, 0.2)
+        task.delay(0.2, function()
+            row:Destroy()
+            local found = table.find(State.Usernames, username)
+            if found then table.remove(State.Usernames, found) end
+            UpdateCount()
+        end)
+    end)
+
+    -- Slide in
+    row.Position = UDim2.new(-0.1, 0, 0, 0)
+    row.BackgroundTransparency = 1
+    task.spawn(function()
+        Tween(row, {BackgroundTransparency = 0.88}, 0.25)
+    end)
+
+    table.insert(UsernameItems, row)
+    return row
+end
+
+local function AddUsername(name)
+    name = name:match("^%s*(.-)%s*$"):gsub("^@", "")
+    if name == "" then return end
+    if table.find(State.Usernames, name) then
+        -- Flash red to indicate duplicate
+        Tween(UnameInput:FindFirstChildOfClass("UIStroke"), {Color = Theme.Danger}, 0.15)
+        task.delay(0.5, function()
+            Tween(UnameInput:FindFirstChildOfClass("UIStroke"), {Color = Theme.Cyan}, 0.3)
+        end)
+        return
+    end
+    table.insert(State.Usernames, name)
+    RenderUsernameItem(name, #State.Usernames)
+    UpdateCount()
+    UnameInput.Text = ""
+end
+
+-- Add button (positioned inside addCard)
+local AddBtn = Make("TextButton", {
+    Text             = "ADD",
+    Font             = Enum.Font.GothamBold,
+    TextSize         = 10,
+    TextColor3       = Theme.Cyan,
+    BackgroundColor3 = Theme.Cyan,
+    BackgroundTransparency = 0.85,
+    BorderSizePixel  = 0,
+    Size             = UDim2.new(0, 72, 1, -16),
+    Position         = UDim2.new(1, -72, 0, 0),
+    ZIndex           = 4,
+    Parent           = addCard,
+})
+AddCorner(AddBtn, 7)
+AddStroke(AddBtn, Theme.Cyan, 1, 0.6)
+AddBtn.MouseButton1Click:Connect(function()
+    AddUsername(UnameInput.Text)
+end)
+UnameInput.FocusLost:Connect(function(enter)
+    if enter then AddUsername(UnameInput.Text) end
+end)
+
+-- ─────────────────────────────────────────────
+--  SNIPE BUTTON
+-- ─────────────────────────────────────────────
+local SnipeCard = Make("Frame", {
+    Size             = UDim2.new(1, 0, 0, 44),
+    BackgroundTransparency = 1,
+    BorderSizePixel  = 0,
+    LayoutOrder      = 5,
+    Parent           = UsernamesPanel,
+})
+
+local SnipeBtn = Make("TextButton", {
+    Text             = "▶  START SNIPING",
+    Font             = Enum.Font.GothamBold,
+    TextSize         = 12,
+    TextColor3       = Theme.Cyan,
+    BackgroundColor3 = Theme.Cyan,
+    BackgroundTransparency = 0.82,
+    BorderSizePixel  = 0,
+    Size             = UDim2.new(1, 0, 0, 42),
+    ZIndex           = 4,
+    Parent           = SnipeCard,
+})
+AddCorner(SnipeBtn, 10)
+AddStroke(SnipeBtn, Theme.Cyan, 1, 0.6)
+
+SnipeBtn.MouseButton1Click:Connect(function()
+    State.Sniping = not State.Sniping
+    if State.Sniping then
+        SnipeBtn.Text = "■  STOP SNIPING"
+        Tween(SnipeBtn, {TextColor3 = Theme.Danger, BackgroundColor3 = Theme.Danger}, 0.3)
+        Tween(SnipeBtn:FindFirstChildOfClass("UIStroke"), {Color = Theme.Danger}, 0.3)
+        SetStatus("SNIPING", Theme.Warning)
+    else
+        SnipeBtn.Text = "▶  START SNIPING"
+        Tween(SnipeBtn, {TextColor3 = Theme.Cyan, BackgroundColor3 = Theme.Cyan}, 0.3)
+        Tween(SnipeBtn:FindFirstChildOfClass("UIStroke"), {Color = Theme.Cyan}, 0.3)
+        SetStatus("IDLE", Theme.CyanDim)
+    end
+end)
+
+-- ─────────────────────────────────────────────
+--  PANEL: SETTINGS
+-- ─────────────────────────────────────────────
+local SettingsPanel = NewPanel("Settings")
+
+-- ── Auto Send ──
+SectionLabel("Auto Send", SettingsPanel, 10)
+
+local autoCard = Card(SettingsPanel, 11, 110)
+autoCard.AutomaticSize = Enum.AutomaticSize.Y
+
+-- Auto Send Enabled toggle
+SettingRow(autoCard,
+    "Auto Send Enabled",
+    "Automatically send snipe requests when a username is detected",
+    function(card)
+        Toggle(card, 0, 0, false, function(v) State.AutoSend = v end)
+    end
+)
+
+Make("Frame", { Size=UDim2.new(1,0,0,1), BackgroundColor3=Theme.Border, BackgroundTransparency=0.7, BorderSizePixel=0, ZIndex=3, Parent=autoCard })
+
+-- Spacer
+Make("Frame", { Size=UDim2.new(1,0,0,34), BackgroundTransparency=1, ZIndex=3, Parent=autoCard })
+
+SettingRow(autoCard,
+    "Loop Mode",
+    "Repeat sniping queue continuously until stopped",
+    function(card)
+        -- offset row manually
+        local lToggleBg, _ = Toggle(card, 0, 34, false, function(v) State.LoopMode = v end)
+        lToggleBg.Position = UDim2.new(1, -40, 0.5, 17)
+    end
+)
+
+-- Interval row
+local intRow = Make("Frame", {
+    Size             = UDim2.new(1, 0, 0, 36),
+    BackgroundTransparency = 1,
+    ZIndex           = 3,
+    Parent           = autoCard,
+})
+
+Make("TextLabel", {
+    Text               = "Send Interval (ms)",
+    Font               = Enum.Font.GothamBold,
+    TextSize           = 12,
+    TextColor3         = Theme.TextPrimary,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 0, 0, 2),
+    Size               = UDim2.new(0.65, 0, 0, 16),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 4,
+    Parent             = intRow,
+})
+Make("TextLabel", {
+    Text               = "Delay between each snipe attempt",
+    Font               = Enum.Font.Gotham,
+    TextSize           = 10,
+    TextColor3         = Theme.TextMuted,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 0, 0, 20),
+    Size               = UDim2.new(0.65, 0, 0, 14),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 4,
+    Parent             = intRow,
+})
+local IntervalBox = Make("TextBox", {
+    Text               = "500",
+    Font               = Enum.Font.GothamBold,
+    TextSize           = 11,
+    TextColor3         = Theme.Cyan,
+    PlaceholderText    = "500",
+    BackgroundColor3   = Color3.fromRGB(5,5,12),
+    BorderSizePixel    = 0,
+    Size               = UDim2.new(0, 64, 0, 28),
+    Position           = UDim2.new(1, -64, 0.5, -14),
+    TextXAlignment     = Enum.TextXAlignment.Center,
+    ZIndex             = 4,
+    Parent             = intRow,
+})
+AddCorner(IntervalBox, 7)
+AddStroke(IntervalBox, Theme.Cyan, 1, 0.7)
+IntervalBox.FocusLost:Connect(function()
+    local n = tonumber(IntervalBox.Text)
+    if n then
+        State.Interval = math.clamp(n, 100, 9999)
+        IntervalBox.Text = tostring(State.Interval)
+    else
+        IntervalBox.Text = tostring(State.Interval)
+    end
+end)
+
+-- ── Notifications ──
+SectionLabel("Notifications", SettingsPanel, 20)
+
+local notifCard = Card(SettingsPanel, 21, 80)
+notifCard.AutomaticSize = Enum.AutomaticSize.Y
+
+SettingRow(notifCard, "Sound Alerts", "Play a sound when a username becomes available",
+    function(c) Toggle(c, 0, 0, true, function(v) State.SoundAlerts = v end) end)
+
+Make("Frame", { Size=UDim2.new(1,0,0,1), BackgroundColor3=Theme.Border, BackgroundTransparency=0.7, BorderSizePixel=0, ZIndex=3, Parent=notifCard })
+Make("Frame", { Size=UDim2.new(1,0,0,34), BackgroundTransparency=1, ZIndex=3, Parent=notifCard })
+
+SettingRow(notifCard, "Desktop Notifications", "Show system notifications on snipe success",
+    function(c)
+        local nb, _ = Toggle(c, 0, 0, false, function(v) State.Notifications = v end)
+        nb.Position = UDim2.new(1, -40, 0.5, 17)
+    end)
+
+-- ── Import ──
+SectionLabel("Import", SettingsPanel, 30)
+
+local importCard = Card(SettingsPanel, 31, 52)
+
+Make("TextLabel", {
+    Text               = "Import Usernames",
+    Font               = Enum.Font.GothamBold,
+    TextSize           = 12,
+    TextColor3         = Theme.TextPrimary,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 0, 0, 2),
+    Size               = UDim2.new(0.68, 0, 0, 16),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 3,
+    Parent             = importCard,
+})
+Make("TextLabel", {
+    Text               = "Paste a list of usernames (one per line) to bulk-add",
+    Font               = Enum.Font.Gotham,
+    TextSize           = 10,
+    TextColor3         = Theme.TextMuted,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 0, 0, 20),
+    Size               = UDim2.new(0.68, 0, 0, 14),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 3,
+    Parent             = importCard,
+})
+CyberButton("IMPORT", importCard, 31, Theme.Cyan, function()
+    -- Open import modal
+    ImportModal.Visible = true
+    SpringTween(ImportBox, {Size = UDim2.new(0, 360, 0, 260)}, 0.35)
+    Tween(ModalBg, {BackgroundTransparency = 0.4}, 0.25)
+    ImportTextBox.Text = ""
+    ImportTextBox:CaptureFocus()
+end)
+
+-- ── Danger Zone ──
+SectionLabel("Danger Zone", SettingsPanel, 40)
+
+local dangerCard = Card(SettingsPanel, 41, 52)
+
+Make("TextLabel", {
+    Text               = "Clear All Usernames",
+    Font               = Enum.Font.GothamBold,
+    TextSize           = 12,
+    TextColor3         = Theme.TextPrimary,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 0, 0, 2),
+    Size               = UDim2.new(0.68, 0, 0, 16),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 3,
+    Parent             = dangerCard,
+})
+Make("TextLabel", {
+    Text               = "Remove all usernames from the snipe queue",
+    Font               = Enum.Font.Gotham,
+    TextSize           = 10,
+    TextColor3         = Theme.TextMuted,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 0, 0, 20),
+    Size               = UDim2.new(0.68, 0, 0, 14),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 3,
+    Parent             = dangerCard,
+})
+CyberButton("CLEAR", dangerCard, 41, Theme.Danger, function()
+    State.Usernames = {}
+    for _, v in pairs(ListScroll:GetChildren()) do
+        if v:IsA("Frame") then v:Destroy() end
+    end
+    EmptyLabel.Visible = true
+    UpdateCount()
+    SetStatus("CLEARED", Theme.Danger)
+    task.delay(2, function() SetStatus("IDLE", Theme.CyanDim) end)
+end)
+
+-- ─────────────────────────────────────────────
+--  IMPORT MODAL
+-- ─────────────────────────────────────────────
+local ImportModal = Make("Frame", {
+    Name             = "ImportModal",
+    Size             = UDim2.new(1, 0, 1, 0),
+    Position         = UDim2.new(0, 0, 0, 0),
+    BackgroundTransparency = 1,
+    BorderSizePixel  = 0,
+    ZIndex           = 10,
+    Visible          = false,
+    ClipsDescendants = false,
+    Parent           = Window,
+})
+
+local ModalBg = Make("Frame", {
+    Size             = UDim2.new(1, 0, 1, 0),
+    BackgroundColor3 = Color3.new(0,0,0),
+    BackgroundTransparency = 1,
+    BorderSizePixel  = 0,
+    ZIndex           = 10,
+    Parent           = ImportModal,
+})
+AddCorner(ModalBg, 14)
+
+local ImportBox = Make("Frame", {
+    Name             = "ImportBox",
+    Size             = UDim2.new(0, 10, 0, 10),  -- starts small, springs open
+    Position         = UDim2.new(0.5, -180, 0.5, -130),
+    BackgroundColor3 = Color3.fromRGB(10, 10, 24),
+    BorderSizePixel  = 0,
+    ZIndex           = 11,
+    ClipsDescendants = true,
+    Parent           = ImportModal,
+})
+AddCorner(ImportBox, 12)
+AddStroke(ImportBox, Theme.Cyan, 1, 0.6)
+AddPadding(ImportBox, 18, 18, 18, 18)
+
+Make("TextLabel", {
+    Text               = "⬆  IMPORT USERNAMES",
+    Font               = Enum.Font.GothamBold,
+    TextSize           = 13,
+    TextColor3         = Theme.Cyan,
+    BackgroundTransparency = 1,
+    Size               = UDim2.new(1, 0, 0, 20),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 12,
+    Parent             = ImportBox,
+})
+Make("TextLabel", {
+    Text               = "One username per line. Duplicates will be skipped.",
+    Font               = Enum.Font.Gotham,
+    TextSize           = 10,
+    TextColor3         = Theme.TextMuted,
+    BackgroundTransparency = 1,
+    Position           = UDim2.new(0, 0, 0, 26),
+    Size               = UDim2.new(1, 0, 0, 14),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    ZIndex             = 12,
+    Parent             = ImportBox,
+})
+
+local ImportTextBox = Make("TextBox", {
+    PlaceholderText    = "username1\nusername2\nusername3\n...",
+    PlaceholderColor3  = Theme.TextMuted,
+    Text               = "",
+    Font               = Enum.Font.Code,
+    TextSize           = 11,
+    TextColor3         = Theme.TextPrimary,
+    BackgroundColor3   = Color3.fromRGB(4, 4, 10),
+    BorderSizePixel    = 0,
+    MultiLine          = true,
+    ClearTextOnFocus   = false,
+    Position           = UDim2.new(0, 0, 0, 48),
+    Size               = UDim2.new(1, 0, 0, 118),
+    TextXAlignment     = Enum.TextXAlignment.Left,
+    TextYAlignment     = Enum.TextYAlignment.Top,
+    ZIndex             = 12,
+    Parent             = ImportBox,
+})
+AddCorner(ImportTextBox, 8)
+AddStroke(ImportTextBox, Theme.Cyan, 1, 0.75)
+AddPadding(ImportTextBox, 8, 10, 8, 10)
+
+local function CloseImportModal()
+    Tween(ModalBg, {BackgroundTransparency = 1}, 0.2)
+    Tween(ImportBox, {Size = UDim2.new(0, 10, 0, 10)}, 0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+    task.delay(0.25, function() ImportModal.Visible = false end)
+end
+
+-- Cancel button
+local CancelBtn = Make("TextButton", {
+    Text             = "CANCEL",
+    Font             = Enum.Font.GothamBold,
+    TextSize         = 10,
+    TextColor3       = Theme.TextSecondary,
+    BackgroundColor3 = Color3.fromRGB(30,30,50),
+    BackgroundTransparency = 0.5,
+    BorderSizePixel  = 0,
+    Position         = UDim2.new(0, 0, 0, 178),
+    Size             = UDim2.new(0.46, 0, 0, 28),
+    ZIndex           = 12,
+    Parent           = ImportBox,
+})
+AddCorner(CancelBtn, 7)
+AddStroke(CancelBtn, Theme.Border, 1, 0.6)
+CancelBtn.MouseButton1Click:Connect(CloseImportModal)
+
+-- Import button
+local DoImportBtn = Make("TextButton", {
+    Text             = "IMPORT",
+    Font             = Enum.Font.GothamBold,
+    TextSize         = 10,
+    TextColor3       = Theme.Cyan,
+    BackgroundColor3 = Theme.Cyan,
+    BackgroundTransparency = 0.82,
+    BorderSizePixel  = 0,
+    Position         = UDim2.new(0.54, 0, 0, 178),
+    Size             = UDim2.new(0.46, 0, 0, 28),
+    ZIndex           = 12,
+    Parent           = ImportBox,
+})
+AddCorner(DoImportBtn, 7)
+AddStroke(DoImportBtn, Theme.Cyan, 1, 0.6)
+
+DoImportBtn.MouseButton1Click:Connect(function()
+    local raw  = ImportTextBox.Text
+    local added = 0
+    for line in raw:gmatch("[^\n]+") do
+        local name = line:match("^%s*(.-)%s*$"):gsub("^@", "")
+        if name ~= "" and not table.find(State.Usernames, name) then
+            table.insert(State.Usernames, name)
+            RenderUsernameItem(name, #State.Usernames)
+            added += 1
+        end
+    end
+    UpdateCount()
+    CloseImportModal()
+
+    -- Switch to Usernames tab
+    task.delay(0.05, function()
+        for _, tab in pairs(TabButtons) do
+            if tab.Name == "Tab_usernames" then
+                tab.Activated:Fire()
+            end
+        end
+    end)
+
+    SetStatus("IMPORTED " .. added .. " USERNAME" .. (added ~= 1 and "S" or ""), Theme.Success)
+    task.delay(3, function() SetStatus("IDLE", Theme.CyanDim) end)
+end)
+
+-- Background click to close
+ModalBg.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        CloseImportModal()
+    end
+end)
+
+-- ─────────────────────────────────────────────
+--  TAB BUTTON BUILDER  (runs after panels exist)
+-- ─────────────────────────────────────────────
+local TabButtons = {}
+
+local TabDefs = {
+    { id = "usernames", icon = "👤", label = "Usernames", panel = UsernamesPanel, order = 1 },
+    { id = "settings",  icon = "⚙",  label = "Settings",  panel = SettingsPanel,  order = 2 },
+}
+
+local activeTab = nil
+
+local function SwitchTab(def)
+    if activeTab == def.id then return end
+    activeTab = def.id
+    State.ActiveTab = def.id
+
+    for _, td in pairs(TabDefs) do
+        local btn = TabButtons[td.id]
+        if btn then
+            if td.id == def.id then
+                Tween(btn, {
+                    BackgroundTransparency = 0.88,
+                    TextColor3 = Theme.Cyan,
+                }, 0.2)
+                btn:FindFirstChildOfClass("UIStroke").Color = Theme.Cyan
+            else
+                Tween(btn, {
+                    BackgroundTransparency = 1,
+                    TextColor3 = Theme.TextMuted,
+                }, 0.2)
+                btn:FindFirstChildOfClass("UIStroke").Color = Theme.Border
+            end
+        end
+        -- Animate panel
+        if td.id == def.id then
+            td.panel.Visible = true
+            td.panel.Position = UDim2.new(0.05, 0, 0, 0)
+            Tween(td.panel, {Position = UDim2.new(0,0,0,0)}, 0.25)
+        else
+            Tween(td.panel, {Position = UDim2.new(-0.05,0,0,0)}, 0.2)
+            task.delay(0.2, function()
+                if activeTab ~= td.id then
+                    td.panel.Visible = false
+                end
+            end)
+        end
+    end
+end
+
+for _, def in ipairs(TabDefs) do
+    local isFirst = def.order == 1
+    local tabBtn = Make("TextButton", {
+        Name             = "Tab_" .. def.id,
+        Text             = def.icon .. "  " .. def.label:upper(),
+        Font             = Enum.Font.GothamBold,
+        TextSize         = 10,
+        TextColor3       = isFirst and Theme.Cyan or Theme.TextMuted,
+        BackgroundColor3 = Theme.Cyan,
+        BackgroundTransparency = isFirst and 0.88 or 1,
+        BorderSizePixel  = 0,
+        Size             = UDim2.new(0, 120, 0, 28),
+        LayoutOrder      = def.order,
+        ZIndex           = 4,
+        Parent           = TabBar,
+    })
+    AddCorner(tabBtn, 7)
+    AddStroke(tabBtn, isFirst and Theme.Cyan or Theme.Border, 1, isFirst and 0.6 or 0.85)
+
+    TabButtons[def.id] = tabBtn
+    if isFirst then
+        def.panel.Visible = true
+        activeTab = def.id
+    end
+
+    tabBtn.MouseButton1Click:Connect(function()
+        SwitchTab(def)
+    end)
+    tabBtn.Activated:Connect(function()  -- also respond to :Activated for programmatic switching
+        SwitchTab(def)
+    end)
+end
+
+-- ─────────────────────────────────────────────
+--  ENTRANCE ANIMATION
+-- ─────────────────────────────────────────────
+Window.BackgroundTransparency = 1
+Window.Size = UDim2.new(0, 480, 0, 0)
+task.defer(function()
+    SpringTween(Window, {Size = UDim2.new(0, 520, 0, 460)}, 0.5)
+    Tween(Window, {BackgroundTransparency = 0}, 0.3)
+end)
+
+-- ─────────────────────────────────────────────
+--  DONE
+-- ─────────────────────────────────────────────
+print("[OG SNIPER] GUI loaded successfully.")
+print("[OG SNIPER] Use the GUI to manage your username queue and settings.")
